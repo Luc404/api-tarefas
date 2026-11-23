@@ -58,15 +58,17 @@ A API devolve um JSON de status na raiz e uma lista fixa de tarefas em `/tarefas
 ├── buildspec.yml                     # comandos do CodeBuild
 ├── deploy/
 │   ├── appsec.yml                    # AppSpec do CodeDeploy (nome de arquivo antigo)
+│   ├── iam/                          # JSONs das 4 roles IAM
 │   └── scripts/
+│       ├── iniciar.sh                # cria e inicia o servico systemd
 │       ├── instalar.sh               # valida JAR e Java na EC2
-│       └── iniciar.sh                # cria e inicia o servico systemd
+│       └── user-data.sh              # instala Java e agente CodeDeploy na EC2
 └── README.md
 ```
 
 > Observação: o arquivo fonte chama-se `appsec.yml`, mas o `buildspec.yml` o copia para dentro do artefato com o nome `appspec.yml`, que é o nome exigido pelo CodeDeploy. Isso corrige o erro de `cp` que existia antes.
 
-Os arquivos do Maven Wrapper são gerados pelo Spring Initializr e foram mantidos sem comentários extras. Todo o código escrito para este projeto (Java, XML, YAML, properties e shell) tem comentários curtos explicando cada parte. Políticas IAM, quando criadas, serão JSON puro: JSON não aceita comentários, então o motivo de cada permissão fica descrito na seção da AWS abaixo.
+Os arquivos do Maven Wrapper são gerados pelo Spring Initializr e foram mantidos sem comentários extras. Todo o código escrito para este projeto (Java, XML, YAML, properties e shell) tem comentários curtos explicando cada parte. As políticas IAM ficam em `deploy/iam/`; como JSON não aceita comentários, o motivo de cada permissão está em `deploy/iam/README.md` e na seção da AWS abaixo.
 
 ## Rodando localmente
 
@@ -167,10 +169,9 @@ Região usada nos exemplos: `sa-east-1` (São Paulo).
 
 ### 2. Repositório e conexão com GitHub
 
-1. Crie o repositório público `api-tarefas`.
-2. Faça push da branch `main`.
-3. No CodePipeline, crie uma conexão **GitHub App (CodeConnections)**.
-4. Autorize o **AWS Connector for GitHub** apenas no repositório `api-tarefas`.
+1. O repositório público `https://github.com/Luc404/api-tarefas` já foi criado e a branch `main` já está publicada.
+2. No CodePipeline, crie uma conexão **GitHub App (CodeConnections)**.
+3. Autorize o **AWS Connector for GitHub** apenas no repositório `api-tarefas`.
 
 ### 3. IAM (4 roles)
 
@@ -181,9 +182,14 @@ Região usada nos exemplos: `sa-east-1` (São Paulo).
 | `api-tarefas-codedeploy-role` | CodeDeploy publicar na EC2 | política gerenciada `AWSCodeDeployRole` |
 | `api-tarefas-ec2-role` | EC2 baixar artefato e rodar o agente | leitura no bucket do artefato, pacote `aws-codedeploy-sa-east-1`, `AmazonSSMManagedInstanceCore` |
 
+Arquivos prontos em `deploy/iam/` para a conta `178817475770` na região `sa-east-1`:
+- use `*-trust-policy.json` em **Trust relationships**;
+- use `*-policy.json` em **Permissions**;
+- detalhes em `deploy/iam/README.md`.
+
 ### 4. S3
 
-- Bucket: `api-tarefas-artefatos-<ACCOUNT_ID>`
+- Bucket: `api-tarefas-artefatos-178817475770`
 - Versionamento: habilitado
 - Lifecycle: expirar objetos após **7 dias**
 
@@ -199,20 +205,24 @@ Região usada nos exemplos: `sa-east-1` (São Paulo).
   - entrada `8080` do seu IP (ou `0.0.0.0/0` somente durante a demo);
   - saída liberada.
 
-User data da instância:
+User data da instância (arquivo `deploy/scripts/user-data.sh`):
 
 ```bash
 #!/bin/bash
-# Instala Java 21.
+# Atualiza a lista de pacotes e instala Java 21 e wget.
 dnf install -y java-21-amazon-corretto-headless wget
 
-# Baixa e instala o agente do CodeDeploy v2.
+# Vai para /tmp, onde o instalador do agente será baixado.
 cd /tmp
-wget https://aws-codedeploy-sa-east-1.s3.sa-east-1.amazonaws.com/latestv2/install
+
+# Baixa o instalador oficial do CodeDeploy v2 para sa-east-1.
+wget -q https://aws-codedeploy-sa-east-1.s3.sa-east-1.amazonaws.com/latestv2/install
+
+# Dá permissão de execução e instala o agente em modo automático.
 chmod +x install
 ./install auto
 
-# Garante que o agente suba junto com a máquina.
+# Garante que o agente suba junto com a instância.
 systemctl enable --now codedeploy-agent
 ```
 
@@ -297,3 +307,5 @@ Os commits foram feitos em etapas pequenas e explicadas:
 1. `feat: adiciona API REST de tarefas com Spring Boot e teste` — código Java, `pom.xml`, properties e wrapper.
 2. `build: adiciona buildspec e scripts de build/deploy` — `buildspec.yml`, `deploy/appsec.yml` e scripts.
 3. `docs: adiciona README completo e .gitignore da raiz` — documentação e exclusões do repositório.
+4. `chore: adiciona políticas IAM e user-data da EC2` — JSONs das 4 roles e script de instalação do agente.
+5. `docs: fixa Account ID e nomes AWS no README` — bucket, região e arquivos de IAM com os valores reais.
