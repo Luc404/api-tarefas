@@ -4,9 +4,12 @@ API REST de exemplo com **Spring Boot 4.2.0 + Java 21** para a atividade de Arqu
 
 **Nada é criado em serviço externo.** Os “recursos da AWS” são objetos em memória dentro da própria aplicação.
 
+Para o passo a passo completo e o motivo de cada escolha, veja [ARQUITETURA.md](ARQUITETURA.md).
+
 ## Sumário
 
 - [Visão geral](#visão-geral)
+- [Arquitetura detalhada](ARQUITETURA.md)
 - [Tecnologias](#tecnologias)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Rodando localmente](#rodando-localmente)
