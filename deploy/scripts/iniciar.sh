@@ -1,4 +1,5 @@
 #!/bin/bash
+# Script ilustrativo: a simulação não executa isto em nenhum serviço externo.
 # Para o script se qualquer comando der erro.
 set -e
 

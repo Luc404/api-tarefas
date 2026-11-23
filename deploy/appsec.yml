@@ -1,3 +1,4 @@
+# AppSpec ilustrativo: a simulação não executa isto em nenhum serviço externo.
 version: 0.0 # Versão do formato AppSpec.
 os: linux # Sistema operacional da instância.
 
