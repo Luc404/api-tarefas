@@ -1,6 +1,8 @@
 # api-tarefas
 
-API REST de exemplo com **Spring Boot 4.2.0 + Java 21** para a atividade de Arquitetura. Ela roda local com Maven e foi preparada para subir no **AWS Free Tier** com `CodePipeline → CodeBuild → CodeDeploy → EC2`.
+API REST de exemplo com **Spring Boot 4.2.0 + Java 21** para a atividade de Arquitetura. Ela roda local com Maven e inclui uma camada que **simula** o fluxo de CodePipeline, CodeBuild, S3, CodeDeploy, EC2 e IAM.
+
+**Nada é criado em serviço externo.** Os “recursos da AWS” são objetos em memória dentro da própria aplicação.
 
 ## Sumário
 
@@ -8,37 +10,36 @@ API REST de exemplo com **Spring Boot 4.2.0 + Java 21** para a atividade de Arqu
 - [Tecnologias](#tecnologias)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Rodando localmente](#rodando-localmente)
-- [Endpoints](#endpoints)
+- [Endpoints da API](#endpoints-da-api)
+- [Endpoints da simulação](#endpoints-da-simulação)
+- [Como a simulação funciona](#como-a-simulação-funciona)
+- [Arquivos ilustrativos](#arquivos-ilustrativos)
 - [Testes](#testes)
-- [Build de deploy](#build-de-deploy)
-- [Deploy na AWS (console, modo free)](#deploy-na-aws-console-modo-free)
-- [Cuidados para não pagar nada](#cuidados-para-não-pagar-nada)
+- [Build](#build)
 - [Solução de problemas](#solução-de-problemas)
 - [Commits](#commits)
 
 ## Visão geral
 
-O fluxo completo é:
+A simulação reproduce este caminho:
 
 ```text
-push na branch main
-   -> CodePipeline (GitHub App / CodeConnections)
-   -> CodeBuild (buildspec.yml)
-   -> artefato no S3 (app.jar + appspec.yml + scripts)
-   -> CodeDeploy
-   -> EC2 com o serviço systemd api-tarefas na porta 8080
+POST /aws/pipeline/run
+   -> CodeBuild simulado   (status SUCESSO)
+   -> S3 simulado          (app.jar + appspec.yml em memória)
+   -> CodeDeploy simulado  (status SUCESSO)
+   -> EC2 simulada         (estado RODANDO)
 ```
 
-A API devolve um JSON de status na raiz e uma lista fixa de tarefas em `/tarefas`.
+O estado pode ser consultado em `GET /aws/status`. Tudo some quando a aplicação para, porque não há persistência nem chamada externa.
 
 ## Tecnologias
 
-- Java 21 (Corretto na AWS)
+- Java 21
 - Spring Boot 4.2.0
 - Maven Wrapper (`mvnw` / `mvnw.cmd`)
 - JUnit 5 + `spring-boot-starter-webmvc-test`
-- AWS: CodePipeline, CodeBuild, CodeDeploy, EC2, S3, IAM, CloudWatch, Budgets
-- GitHub: repositório público `api-tarefas` + GitHub App do CodeConnections
+- Spring MVC para expor os endpoints JSON
 
 ## Estrutura do projeto
 
@@ -51,24 +52,25 @@ A API devolve um JSON de status na raiz e uma lista fixa de tarefas em `/tarefas
 │   └── src/
 │       ├── main/
 │       │   ├── java/com/example/api_tarefas/
-│       │   │   ├── DemoApplication.java    # ponto de entrada do Spring
-│       │   │   └── TarefasController.java  # rotas da API
+│       │   │   ├── DemoApplication.java       # ponto de entrada do Spring
+│       │   │   ├── TarefasController.java     # rotas da API de tarefas
+│       │   │   └── aws/
+│       │   │       ├── AwsSimulationController.java # rotas da simulacao
+│       │   │       └── AwsSimulationService.java    # estado simulado em memoria
 │       │   └── resources/application.properties
-│       └── test/java/com/example/api_tarefas/DemoApplicationTests.java
-├── buildspec.yml                     # comandos do CodeBuild
+│       └── test/java/com/example/api_tarefas/
+│           ├── DemoApplicationTests.java
+│           └── aws/AwsSimulationServiceTest.java
+├── buildspec.yml                     # roteiro ilustrativo de build
 ├── deploy/
-│   ├── appsec.yml                    # AppSpec do CodeDeploy (nome de arquivo antigo)
-│   ├── iam/                          # JSONs das 4 roles IAM
+│   ├── appsec.yml                    # AppSpec ilustrativo
 │   └── scripts/
-│       ├── iniciar.sh                # cria e inicia o servico systemd
-│       ├── instalar.sh               # valida JAR e Java na EC2
-│       └── user-data.sh              # instala Java e agente CodeDeploy na EC2
+│       ├── instalar.sh               # script ilustrativo
+│       └── iniciar.sh                # script ilustrativo
 └── README.md
 ```
 
-> Observação: o arquivo fonte chama-se `appsec.yml`, mas o `buildspec.yml` o copia para dentro do artefato com o nome `appspec.yml`, que é o nome exigido pelo CodeDeploy. Isso corrige o erro de `cp` que existia antes.
-
-Os arquivos do Maven Wrapper são gerados pelo Spring Initializr e foram mantidos sem comentários extras. Todo o código escrito para este projeto (Java, XML, YAML, properties e shell) tem comentários curtos explicando cada parte. As políticas IAM ficam em `deploy/iam/`; como JSON não aceita comentários, o motivo de cada permissão está em `deploy/iam/README.md` e na seção da AWS abaixo.
+Todo o código escrito para este projeto tem comentários curtos explicando cada parte. Os arquivos do Maven Wrapper são gerados pelo Spring Initializr e foram mantidos sem comentários extras.
 
 ## Rodando localmente
 
@@ -87,21 +89,15 @@ cd ApiTarefas/demo
 ./mvnw spring-boot:run
 ```
 
-No Windows, use `mvnw.cmd` no lugar de `./mvnw`.
+No Windows, use `mvnw.cmd`. A aplicação sobe em `http://localhost:8080`.
 
-A API sobe em `http://localhost:8080`.
-
-## Endpoints
+## Endpoints da API
 
 ### `GET /`
-
-Status simples da aplicação.
 
 ```bash
 curl http://localhost:8080/
 ```
-
-Resposta:
 
 ```json
 { "status": "ok", "aplicacao": "api-tarefas" }
@@ -109,13 +105,9 @@ Resposta:
 
 ### `GET /tarefas`
 
-Lista de tarefas de demonstração.
-
 ```bash
 curl http://localhost:8080/tarefas
 ```
-
-Resposta:
 
 ```json
 [
@@ -124,6 +116,68 @@ Resposta:
 ]
 ```
 
+## Endpoints da simulação
+
+### `GET /aws/status`
+
+Mostra o estado atual dos recursos simulados, antes ou depois de executar o pipeline.
+
+```bash
+curl http://localhost:8080/aws/status
+```
+
+### `POST /aws/pipeline/run`
+
+Executa o pipeline simulado de ponta a ponta.
+
+```bash
+curl -X POST http://localhost:8080/aws/pipeline/run
+```
+
+Resposta resumida:
+
+```json
+{
+  "ambiente": "SIMULADO",
+  "codepipeline": { "nome": "api-tarefas-pipeline", "status": "CONCLUIDO" },
+  "codebuild": { "nome": "api-tarefas-build", "status": "SUCESSO" },
+  "s3": {
+    "bucket": "api-tarefas-artefatos-simulado",
+    "artefatos": {
+      "app.jar": "JAR simulado gerado pelo build",
+      "appspec.yml": "AppSpec simulado"
+    }
+  },
+  "codedeploy": { "aplicacao": "api-tarefas", "grupo": "api-tarefas-dg", "status": "SUCESSO" },
+  "ec2": { "nome": "api-tarefas", "tipo": "t3.micro", "estado": "RODANDO (simulado)" },
+  "iam": {
+    "papeis": [
+      "api-tarefas-codebuild-role",
+      "api-tarefas-pipeline-role",
+      "api-tarefas-codedeploy-role",
+      "api-tarefas-ec2-role"
+    ]
+  }
+}
+```
+
+## Como a simulação funciona
+
+| Recurso simulado | Onde está | O que faz |
+| --- | --- | --- |
+| CodePipeline | `AwsSimulationService` | Muda o status de `PRONTO` para `EXECUTANDO` e depois `CONCLUIDO`. |
+| CodeBuild | `AwsSimulationService` | Marca o build como `SUCESSO`. |
+| S3 | Mapa `artefatos` | Guarda `app.jar` e `appspec.yml` apenas em memória. |
+| CodeDeploy | `AwsSimulationService` | Marca o deploy como `SUCESSO`. |
+| EC2 | `AwsSimulationService` | Mostra a instância como `RODANDO (simulado)` após o deploy. |
+| IAM | Lista `papeis` | Mostra os nomes dos papéis que fariam parte do fluxo. |
+
+## Arquivos ilustrativos
+
+`buildspec.yml`, `deploy/appsec.yml`, `deploy/scripts/iniciar.sh` e `deploy/scripts/instalar.sh` mostram como seria o formato de build e deploy. Eles **não são executados pela simulação** e possuem comentários dizendo isso.
+
+O arquivo fonte chama-se `appsec.yml`, mas o `buildspec.yml` o copiaria para `appspec.yml`, que é o nome exigido pelo formato de deploy. Isso apenas documenta a correção feita no projeto.
+
 ## Testes
 
 ```bash
@@ -131,160 +185,17 @@ cd ApiTarefas/demo
 ./mvnw test
 ```
 
-O teste `contextLoads` carrega o contexto Spring. Ele está no pacote `com.example.api_tarefas` de propósito: se o teste ficasse em `com.example.demo`, o Spring não encontraria a configuração.
+- `DemoApplicationTests`: verifica se o contexto Spring carrega.
+- `AwsSimulationServiceTest`: verifica se o pipeline simulado termina com sucesso e gera o artefato `app.jar`.
 
-## Build de deploy
-
-O `buildspec.yml` faz tudo em uma etapa:
-
-1. entra em `ApiTarefas/demo`;
-2. roda `./mvnw clean package` (testa e gera o JAR);
-3. monta `deploy-package/` com:
-   - `app.jar`
-   - `appspec.yml`
-   - `scripts/instalar.sh`
-   - `scripts/iniciar.sh`
-
-Para reproduzir localmente:
+## Build
 
 ```bash
+cd ApiTarefas/demo
 ./mvnw clean package
-mkdir -p deploy-package/scripts
-cp ApiTarefas/demo/target/*.jar deploy-package/app.jar
-cp deploy/appsec.yml deploy-package/appspec.yml
-cp deploy/scripts/*.sh deploy-package/scripts/
-chmod +x deploy-package/scripts/*.sh
 ```
 
-## Deploy na AWS (console, modo free)
-
-Região usada nos exemplos: `sa-east-1` (São Paulo).
-
-### 1. Conta e proteção de gastos
-
-1. Crie a conta AWS no **Free plan**.
-2. Abra **Budgets** → crie um budget de **US$ 5,00** por mês.
-3. Adicione alarmes em 80% e 100% para o e-mail da conta.
-4. Não faça upgrade para o plano pago.
-
-### 2. Repositório e conexão com GitHub
-
-1. O repositório público `https://github.com/Luc404/api-tarefas` já foi criado e a branch `main` já está publicada.
-2. No CodePipeline, crie uma conexão **GitHub App (CodeConnections)**.
-3. Autorize o **AWS Connector for GitHub** apenas no repositório `api-tarefas`.
-
-### 3. IAM (4 roles)
-
-| Role | Uso | Permissões resumidas |
-| --- | --- | --- |
-| `api-tarefas-codebuild-role` | CodeBuild ler/escrever artefatos e logs | CloudWatch Logs + `s3:GetObject`, `s3:PutObject` no bucket do artefato |
-| `api-tarefas-pipeline-role` | CodePipeline orquestrar tudo | S3, CodeBuild, CodeDeploy, `codestar-connections:UseConnection`, `iam:PassRole` |
-| `api-tarefas-codedeploy-role` | CodeDeploy publicar na EC2 | política gerenciada `AWSCodeDeployRole` |
-| `api-tarefas-ec2-role` | EC2 baixar artefato e rodar o agente | leitura no bucket do artefato, pacote `aws-codedeploy-sa-east-1`, `AmazonSSMManagedInstanceCore` |
-
-Arquivos prontos em `deploy/iam/` para a conta `178817475770` na região `sa-east-1`:
-- use `*-trust-policy.json` em **Trust relationships**;
-- use `*-policy.json` em **Permissions**;
-- detalhes em `deploy/iam/README.md`.
-
-### 4. S3
-
-- Bucket: `api-tarefas-artefatos-178817475770`
-- Versionamento: habilitado
-- Lifecycle: expirar objetos após **7 dias**
-
-### 5. EC2
-
-- AMI: **Amazon Linux 2023**
-- Tipo: **t3.micro**
-- Disco: 8 GB gp3
-- Instance profile: `api-tarefas-ec2-role`
-- Tag: `Name = api-tarefas`
-- Security group:
-  - entrada `22` apenas do seu IP;
-  - entrada `8080` do seu IP (ou `0.0.0.0/0` somente durante a demo);
-  - saída liberada.
-
-User data da instância (arquivo `deploy/scripts/user-data.sh`):
-
-```bash
-#!/bin/bash
-# Atualiza a lista de pacotes e instala Java 21 e wget.
-dnf install -y java-21-amazon-corretto-headless wget
-
-# Vai para /tmp, onde o instalador do agente será baixado.
-cd /tmp
-
-# Baixa o instalador oficial do CodeDeploy v2 para sa-east-1.
-wget -q https://aws-codedeploy-sa-east-1.s3.sa-east-1.amazonaws.com/latestv2/install
-
-# Dá permissão de execução e instala o agente em modo automático.
-chmod +x install
-./install auto
-
-# Garante que o agente suba junto com a instância.
-systemctl enable --now codedeploy-agent
-```
-
-Validação na EC2:
-
-```bash
-java -version
-systemctl status codedeploy-agent
-```
-
-O status esperado do agente é `active (running)` / `Online`.
-
-### 6. CodeBuild
-
-- Nome: `api-tarefas-build`
-- Source: **CodePipeline**
-- Environment image: `aws/codebuild/amazonlinux-x86_64-standard:5.0`
-- Compute: `BUILD_GENERAL1_SMALL`
-- Buildspec: `buildspec.yml` na raiz
-- Role: `api-tarefas-codebuild-role`
-- Timeout: 20 minutos
-- Artifacts: **CodePipeline**
-
-### 7. CodeDeploy
-
-- Application: `api-tarefas`
-- Compute platform: **EC2/On-premises**
-- Deployment group: `api-tarefas-dg`
-- Service role: `api-tarefas-codedeploy-role`
-- Deployment type: **In-place**
-- Configuração: `CodeDeployDefault.OneAtATime`
-- Seletor: tag `Name = api-tarefas`
-- Load balancer: **nenhum**
-
-### 8. CodePipeline
-
-- Nome: `api-tarefas-pipeline`
-- Service role: `api-tarefas-pipeline-role`
-- Source: **GitHub App (CodeConnections)**, repo `api-tarefas`, branch `main`, webhook habilitado
-- Build: `api-tarefas-build`
-- Deploy: CodeDeploy → `api-tarefas` / `api-tarefas-dg`
-
-### 9. Validação final
-
-Faça um pequeno push na `main`, acompanhe os eventos do pipeline e teste:
-
-```bash
-curl http://<IP_PUBLICO>:8080/
-curl http://<IP_PUBLICO>:8080/tarefas
-```
-
-Depois da demonstração, **termine a instância EC2** para consumir o mínimo de crédito.
-
-## Cuidados para não pagar nada
-
-- 1 pipeline ativa por mês (limite free).
-- CodeBuild em `BUILD_GENERAL1_SMALL` (100 min/mês grátis).
-- CodeDeploy em EC2 não tem cobrança adicional.
-- EC2 `t3.micro` usando os créditos do Free Plan.
-- Sem ALB, NAT Gateway, RDS, EIP reservada, domínio ou segundo pipeline.
-- Budget de US$ 5 com alarme por e-mail.
-- Terminar a EC2 ao final da atividade.
+O comando gera `target/demo-0.0.1-SNAPSHOT.jar`.
 
 ## Solução de problemas
 
@@ -295,17 +206,19 @@ O teste estava em `com.example.demo` enquanto a aplicação estava em `com.examp
 A classe `DemoApplication` estava em `com.example.tarefas`, então o Spring não escaneava o controller. Corrigido para `com.example.api_tarefas`.
 
 **`cp: não foi possível obter estado de .../deploy/appspec.yml`**
-O arquivo no repositório chama-se `deploy/appsec.yml`. O `buildspec.yml` agora copia esse nome para `deploy-package/appspec.yml`.
+O arquivo no repositório chama-se `deploy/appsec.yml`. O `buildspec.yml` copia esse nome para `appspec.yml` no roteiro ilustrativo.
 
 **VS Code marca imports como erro**
-Às vezes o Java Language Server guarda cache de pacotes antigos. Foi feito `Clean Java Language Server Workspace`; se voltar, rode novamente essa limpeza e aguarde o Maven reimportar.
+Às vezes o Java Language Server guarda cache de pacotes antigos. Use `Clean Java Language Server Workspace` e aguarde o Maven reimportar.
 
 ## Commits
 
-Os commits foram feitos em etapas pequenas e explicadas:
+O histórico mostra as etapas, incluindo a versão anterior com arquivos de AWS real que depois foi substituída:
 
-1. `feat: adiciona API REST de tarefas com Spring Boot e teste` — código Java, `pom.xml`, properties e wrapper.
-2. `build: adiciona buildspec e scripts de build/deploy` — `buildspec.yml`, `deploy/appsec.yml` e scripts.
-3. `docs: adiciona README completo e .gitignore da raiz` — documentação e exclusões do repositório.
-4. `chore: adiciona políticas IAM e user-data da EC2` — JSONs das 4 roles e script de instalação do agente.
-5. `docs: fixa Account ID e nomes AWS no README` — bucket, região e arquivos de IAM com os valores reais.
+1. `feat: adiciona API REST de tarefas com Spring Boot e teste`
+2. `build: adiciona buildspec e scripts de build/deploy`
+3. `docs: adiciona README completo e .gitignore da raiz`
+4. `chore: adiciona politicas IAM e user-data da EC2` — etapa anterior, removida depois.
+5. `docs: fixa Account ID e nomes AWS no README` — etapa anterior, substituída depois.
+6. `refactor: substitui AWS real por simulacao local`
+7. `docs: reescreve README para simulacao sem recursos externos`
