@@ -1,0 +1,30 @@
+# Arquivos gerados pelo build.
+ApiTarefas/demo/target/
+deploy-package/
+*.jar
+
+# IDEs e editores.
+.vscode/
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+.factorypath
+.springBeans
+
+# Arquivos do sistema.
+.DS_Store
+Thumbs.db
+
+# Logs e segredos.
+*.log
+.env
+.env.*
+*.pem
+*.key
+credentials
+*token*
+
+# Artefatos locais da extensao de modernizacao do VS Code.
+.github/modernize/
