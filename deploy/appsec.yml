@@ -1,0 +1,20 @@
+version: 0.0 # Versão do formato AppSpec.
+os: linux # Sistema operacional da instância.
+
+files:
+  # O JAR enviado pelo CodeBuild vai para /opt/api-tarefas.
+  - source: app.jar
+    destination: /opt/api-tarefas
+
+hooks:
+  # Depois de copiar o JAR, valida se dá para iniciar.
+  AfterInstall:
+    - location: scripts/instalar.sh
+      timeout: 120
+      runas: root
+
+  # Na hora de iniciar, cria o serviço systemd e sobe a API.
+  ApplicationStart:
+    - location: scripts/iniciar.sh
+      timeout: 60
+      runas: root

@@ -1,0 +1,25 @@
+version: 0.2 # Versão do formato do buildspec.
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto21 # Java 21 no CodeBuild.
+
+  build:
+    commands:
+      - cd ApiTarefas/demo # Entra no projeto Maven.
+      - chmod +x mvnw # Garante que o wrapper seja executável.
+      - ./mvnw clean package # Testa e gera o JAR de uma vez.
+      - mkdir -p ../../deploy-package/scripts # Cria a pasta do artefato.
+      - cp target/*.jar ../../deploy-package/app.jar # Copia o JAR para o artefato.
+      - cd ../.. # Volta para a raiz do repositório.
+      - cp deploy/appsec.yml deploy-package/appspec.yml # Arquivo esperado pelo CodeDeploy.
+      - cp deploy/scripts/*.sh deploy-package/scripts/ # Copia os scripts de deploy.
+      - chmod +x deploy-package/scripts/*.sh # Permite executar os scripts.
+
+artifacts:
+  base-directory: deploy-package # Pasta enviada para o CodeDeploy.
+  files: # Arquivos que entram no artefato.
+    - app.jar
+    - appspec.yml
+    - scripts/*
